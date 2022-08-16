@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "typeRoots": ["./typings", "./node_modules/@types"],
+    "types": ["node"],
+    "outDir": "./lib",
+    "lib": ["ES2019"],
+    "module": "commonjs",
+    "target": "ES2019",
+    "declaration": true,
+    "noUnusedLocals": true,
+    "noErrorTruncation": true,
+    "pretty": true,
+    "strict": true
+  }
+}
