@@ -1,3 +1,4 @@
+const erlang_dist = require("@stdlib/random-base-erlang");
 interface Result {
   latency: number;
   success: boolean;
@@ -9,6 +10,7 @@ interface Summary {
   "Call depth": number;
   "Service failure rate": number;
   "Max retries": number;
+  "Backoff base": number;
   Strategy: string;
 
   // TODO: success latencies and failure latencies?
@@ -21,7 +23,7 @@ function create_service(
   dependency: Service | undefined,
   failure_rate: number,
   max_retries: number,
-  backoff_base = 100
+  backoff_base: number
 ) {
   const service: Service = {
     request({ retry }) {
@@ -60,21 +62,34 @@ function create_service(
 function run(n = 10_000) {
   const call_depths = [3];
   const failure_rates = [0.01, 0.1, 0.8];
-  const max_retry_values = [0, 1, 3];
+  const max_retry_values = [0, 3];
   const strategies = ["all", "top_only"];
 
   // TODO: model shorter backoff = more likely failure
-  // const backoff_bases = [100];
+  const backoff_bases = [10, 100];
 
   const combinations = call_depths.flatMap((call_depth) =>
     failure_rates.flatMap((failure_rate) =>
       max_retry_values.flatMap((max_retries) =>
-        strategies.map((strategy) => ({
-          call_depth,
-          failure_rate,
-          max_retries,
-          strategy,
-        }))
+        max_retries == 0
+          ? [
+              {
+                call_depth,
+                failure_rate,
+                max_retries,
+                backoff_base: 0,
+                strategy: "none",
+              },
+            ]
+          : backoff_bases.flatMap((backoff_base) =>
+              strategies.map((strategy) => ({
+                call_depth,
+                failure_rate,
+                max_retries,
+                backoff_base,
+                strategy,
+              }))
+            )
       )
     )
   );
@@ -85,20 +100,23 @@ function run(n = 10_000) {
     call_depth,
     failure_rate,
     max_retries,
+    backoff_base,
     strategy,
   } of combinations) {
-    if (max_retries == 0 && strategy == "top_only") {
-      continue;
-    }
-
     const client: Service = create_service(
       Array.from(Array(call_depth)).reduce(
         (d) =>
-          create_service(d, failure_rate, strategy == "all" ? max_retries : 0),
+          create_service(
+            d,
+            failure_rate,
+            strategy == "all" ? max_retries : 0,
+            backoff_base
+          ),
         undefined
       ),
       failure_rate,
-      max_retries
+      max_retries,
+      backoff_base
     );
 
     const results: Array<Result> = [];
@@ -110,7 +128,8 @@ function run(n = 10_000) {
       "Call depth": call_depth,
       "Service failure rate": failure_rate,
       "Max retries": max_retries,
-      Strategy: max_retries == 0 ? "-" : strategy,
+      "Backoff base": backoff_base,
+      Strategy: strategy,
 
       "Average latency":
         results.reduce((total, { latency }) => total + latency, 0) /
@@ -129,18 +148,11 @@ function run(n = 10_000) {
   console.table(summaries);
 }
 
-run();
-
-// http://en.wikipedia.org/wiki/Exponential_distribution#Generating_exponential_variates
-function random_exponential(rate = 1) {
-  const U = Math.random();
-  return -Math.log(U) / rate;
-}
+const rand = erlang_dist.factory(5, 1);
 
 // Assume each service does some actual work
-// In milliseconds
 function service_latency() {
-  // Mean = 1 / rate = 50ms
-  const rate = 0.02;
-  return random_exponential(rate);
+  return rand();
 }
+
+run();

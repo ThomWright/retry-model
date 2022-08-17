@@ -1,5 +1,8 @@
 {
   "devDependencies": {
     "@types/node": "^18.7.6"
+  },
+  "dependencies": {
+    "@stdlib/random-base-erlang": "^0.0.6"
   }
 }
