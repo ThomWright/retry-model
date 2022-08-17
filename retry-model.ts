@@ -1,17 +1,26 @@
+// const beta_dist = require("@stdlib/random-base-beta");
+const beta_dist_pdf = require("@stdlib/stats-base-dists-beta-pdf");
 const erlang_dist = require("@stdlib/random-base-erlang");
+
 interface Result {
   latency: number;
   success: boolean;
 }
 interface Service {
-  request({ retry }: { retry: boolean }): Result;
+  request({
+    retry,
+    time_since_first_attempt,
+  }: {
+    retry: boolean;
+    time_since_first_attempt: number;
+  }): Result;
 }
 interface Summary {
   "Call depth": number;
   "Service failure rate": number;
   "Max retries": number;
   "Backoff base": number;
-  Strategy: string;
+  "Retry strategy": string;
 
   // TODO: success latencies and failure latencies?
   "Average latency": number;
@@ -26,47 +35,64 @@ function create_service(
   backoff_base: number
 ) {
   const service: Service = {
-    request({ retry }) {
-      if (dependency != null) {
-        let res = dependency.request({ retry: false });
+    request({ retry, time_since_first_attempt }) {
+      // Retries are more likely to success the longer they wait.
+      // Will always succeed after 1000ms.
+      const scale = retry
+        ? beta_dist_pdf(Math.min(time_since_first_attempt / 1000, 1), 1, 5) / 5
+        : 1;
+      const succeed = Math.random() > failure_rate * scale;
 
-        let retries = 0;
-        let retry_latency = 0;
-        while (res.success == false && retries < max_retries) {
-          res = dependency.request({ retry: true });
-
-          // Back off with jitter
-          retry_latency += backoff_base * Math.pow(2, retries) * Math.random();
-          retries++;
-        }
-
+      if (dependency == null) {
         return {
-          latency:
-            res.latency +
-            retry_latency +
-            // If this is a retry, assume we can skip some work sometimes because we've already done it
-            // TODO: don't skip work if this service was the cause of the failure (only skip if dependency failed)
-            (retry ? Math.random() * service_latency() : service_latency()),
-          success: res.success && Math.random() > failure_rate,
+          latency: service_latency(),
+          success: succeed,
         };
       }
+
+      let res = dependency.request({
+        retry: false,
+        time_since_first_attempt: 0,
+      });
+
+      let retries = 0;
+      let retry_latency = 0;
+      while (res.success == false && retries < max_retries) {
+        // Back off with jitter
+        retry_latency += backoff_base * Math.pow(2, retries) * Math.random();
+
+        res = dependency.request({
+          retry: true,
+          time_since_first_attempt: retry_latency,
+        });
+
+        retries++;
+      }
+
       return {
-        latency: service_latency(),
-        success: Math.random() > failure_rate,
+        latency:
+          res.latency +
+          retry_latency +
+          // If this is a retry, assume we can skip some work sometimes because we've already done it
+          (retry ? Math.random() * service_latency() : service_latency()),
+        success: res.success && succeed,
       };
     },
   };
   return service;
 }
 
+// TODO: record load: total number of requests sent to bottom service
 function run(n = 10_000) {
-  const call_depths = [3];
-  const failure_rates = [0.01, 0.1, 0.8];
+  const call_depths = [2];
+  const failure_rates = [0.01, 0.1, 0.9];
   const max_retry_values = [0, 3];
-  const strategies = ["all", "top_only"];
-
-  // TODO: model shorter backoff = more likely failure
+  const retry_strategies = ["all", "top_only"];
   const backoff_bases = [10, 100];
+
+  const failure_type: "all" | "bottom_only" = "bottom_only" as
+    | "all"
+    | "bottom_only";
 
   const combinations = call_depths.flatMap((call_depth) =>
     failure_rates.flatMap((failure_rate) =>
@@ -78,16 +104,16 @@ function run(n = 10_000) {
                 failure_rate,
                 max_retries,
                 backoff_base: 0,
-                strategy: "none",
+                retry_strategy: "none",
               },
             ]
           : backoff_bases.flatMap((backoff_base) =>
-              strategies.map((strategy) => ({
+              retry_strategies.map((retry_strategy) => ({
                 call_depth,
                 failure_rate,
                 max_retries,
                 backoff_base,
-                strategy,
+                retry_strategy,
               }))
             )
       )
@@ -101,27 +127,29 @@ function run(n = 10_000) {
     failure_rate,
     max_retries,
     backoff_base,
-    strategy,
+    retry_strategy,
   } of combinations) {
     const client: Service = create_service(
-      Array.from(Array(call_depth)).reduce(
-        (d) =>
+      Array.from(Array(call_depth - 1)).reduce(
+        (dependency) =>
           create_service(
-            d,
-            failure_rate,
-            strategy == "all" ? max_retries : 0,
+            dependency,
+            failure_type == "all" ? failure_rate : 0,
+            retry_strategy == "all" ? max_retries : 0,
             backoff_base
           ),
-        undefined
+        create_service(undefined, failure_rate, 0, 0)
       ),
-      failure_rate,
+      failure_type == "all" ? failure_rate : 0,
       max_retries,
       backoff_base
     );
 
     const results: Array<Result> = [];
     for (let step = 0; step < n; step++) {
-      results.push(client.request({ retry: false }));
+      results.push(
+        client.request({ retry: false, time_since_first_attempt: 0 })
+      );
     }
 
     summaries.push({
@@ -129,7 +157,7 @@ function run(n = 10_000) {
       "Service failure rate": failure_rate,
       "Max retries": max_retries,
       "Backoff base": backoff_base,
-      Strategy: strategy,
+      "Retry strategy": retry_strategy,
 
       "Average latency":
         results.reduce((total, { latency }) => total + latency, 0) /
