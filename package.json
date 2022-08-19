@@ -3,7 +3,6 @@
     "@types/node": "^18.7.6"
   },
   "dependencies": {
-    "@stdlib/random-base-erlang": "^0.0.6",
-    "@stdlib/stats-base-dists-beta-pdf": "^0.0.7"
+    "@stdlib/random-base-erlang": "^0.0.6"
   }
 }

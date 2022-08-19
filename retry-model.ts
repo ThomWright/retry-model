@@ -1,5 +1,4 @@
 // const beta_dist = require("@stdlib/random-base-beta");
-const beta_dist_pdf = require("@stdlib/stats-base-dists-beta-pdf");
 const erlang_dist = require("@stdlib/random-base-erlang");
 
 interface Result {
@@ -7,6 +6,8 @@ interface Result {
   success: boolean;
 }
 interface Service {
+  req_count(): number;
+
   request({
     retry,
     time_since_first_attempt,
@@ -26,6 +27,7 @@ interface Summary {
   "Average latency": number;
   "P99 latency": number;
   "Success rate": number;
+  Load: number | string;
 }
 
 function create_service(
@@ -34,12 +36,22 @@ function create_service(
   max_retries: number,
   backoff_base: number
 ) {
+  let req_count = 0;
+
   const service: Service = {
+    req_count() {
+      return req_count;
+    },
+
     request({ retry, time_since_first_attempt }) {
+      req_count++;
+
       // Retries are more likely to success the longer they wait.
-      // Will always succeed after 1000ms.
+      // Will always succeed after `recovery_time` ms.
+      // This is just linear for now for simplicity.
+      const recovery_time = 2000;
       const scale = retry
-        ? beta_dist_pdf(Math.min(time_since_first_attempt / 1000, 1), 1, 5) / 5
+        ? 1 / Math.min(time_since_first_attempt / recovery_time, 1)
         : 1;
       const succeed = Math.random() > failure_rate * scale;
 
@@ -84,8 +96,8 @@ function create_service(
 
 // TODO: record load: total number of requests sent to bottom service
 function run(n = 10_000) {
-  const call_depths = [2];
-  const failure_rates = [0.01, 0.1, 0.9];
+  const call_depths = [3];
+  const failure_rates = [0.9];
   const max_retry_values = [0, 3];
   const retry_strategies = ["all", "top_only"];
   const backoff_bases = [10, 100];
@@ -93,6 +105,8 @@ function run(n = 10_000) {
   const failure_type: "all" | "bottom_only" = "bottom_only" as
     | "all"
     | "bottom_only";
+
+  console.log("Failure type: " + failure_type);
 
   const combinations = call_depths.flatMap((call_depth) =>
     failure_rates.flatMap((failure_rate) =>
@@ -129,6 +143,7 @@ function run(n = 10_000) {
     backoff_base,
     retry_strategy,
   } of combinations) {
+    const bottom_service = create_service(undefined, failure_rate, 0, 0);
     const client: Service = create_service(
       Array.from(Array(call_depth - 1)).reduce(
         (dependency) =>
@@ -138,7 +153,7 @@ function run(n = 10_000) {
             retry_strategy == "all" ? max_retries : 0,
             backoff_base
           ),
-        create_service(undefined, failure_rate, 0, 0)
+        bottom_service
       ),
       failure_type == "all" ? failure_rate : 0,
       max_retries,
@@ -170,6 +185,7 @@ function run(n = 10_000) {
           (successes, { success }) => (success ? successes + 1 : successes),
           0
         ) / results.length,
+      Load: new Intl.NumberFormat("en-GB").format(bottom_service.req_count()),
     });
   }
 
