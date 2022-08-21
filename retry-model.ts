@@ -1,6 +1,21 @@
-// const beta_dist = require("@stdlib/random-base-beta");
+import { readFileSync } from "fs";
+import { stdout } from "process";
+
 const erlang_dist = require("@stdlib/random-base-erlang");
 
+interface Config {
+  call_depths: Array<number>;
+  failure_rates: Array<number>;
+  max_retry_values: Array<number>;
+  retry_strategies: Array<"all" | "top_only">;
+  backoff_bases: Array<number>;
+  /**
+   * - "all"         – Every service has a chance of failing.
+   * - "bottom_only" – Only the dependency at the bottom of the call stack fails.
+   *                    Useful for modelling an outage with a high `failure_rate`.
+   */
+  failure_type: "all" | "top_only";
+}
 interface Result {
   latency: number;
   success: boolean;
@@ -29,6 +44,9 @@ interface Summary {
   "Success rate": number;
   Load: number | string;
 }
+
+// Assume each service does some actual work
+const service_latency = erlang_dist.factory(5, 1);
 
 function create_service(
   dependency: Service | undefined,
@@ -94,19 +112,15 @@ function create_service(
   return service;
 }
 
-// TODO: record load: total number of requests sent to bottom service
-function run(n = 10_000) {
-  const call_depths = [3];
-  const failure_rates = [0.9];
-  const max_retry_values = [0, 3];
-  const retry_strategies = ["all", "top_only"];
-  const backoff_bases = [10, 100];
-
-  const failure_type: "all" | "bottom_only" = "bottom_only" as
-    | "all"
-    | "bottom_only";
-
-  console.log("Failure type: " + failure_type);
+function run(n = 10_000, config: Config, output = "table") {
+  const {
+    call_depths,
+    failure_rates,
+    max_retry_values,
+    retry_strategies,
+    backoff_bases,
+    failure_type,
+  } = config;
 
   const combinations = call_depths.flatMap((call_depth) =>
     failure_rates.flatMap((failure_rate) =>
@@ -134,7 +148,7 @@ function run(n = 10_000) {
     )
   );
 
-  const summaries: Array<Summary> = [];
+  const summaries: Array<{ results: Array<Result>; summary: Summary }> = [];
 
   for (const {
     call_depth,
@@ -144,59 +158,107 @@ function run(n = 10_000) {
     retry_strategy,
   } of combinations) {
     const bottom_service = create_service(undefined, failure_rate, 0, 0);
-    const client: Service = create_service(
-      Array.from(Array(call_depth - 1)).reduce(
-        (dependency) =>
-          create_service(
-            dependency,
+    const server: Service =
+      call_depth > 1
+        ? create_service(
+            Array.from(Array(call_depth - 1)).reduce(
+              (dependency) =>
+                create_service(
+                  dependency,
+                  failure_type == "all" ? failure_rate : 0,
+                  retry_strategy == "all" ? max_retries : 0,
+                  backoff_base
+                ),
+              bottom_service
+            ),
             failure_type == "all" ? failure_rate : 0,
-            retry_strategy == "all" ? max_retries : 0,
+            max_retries,
             backoff_base
-          ),
-        bottom_service
-      ),
-      failure_type == "all" ? failure_rate : 0,
-      max_retries,
-      backoff_base
-    );
+          )
+        : bottom_service;
 
     const results: Array<Result> = [];
     for (let step = 0; step < n; step++) {
       results.push(
-        client.request({ retry: false, time_since_first_attempt: 0 })
+        server.request({ retry: false, time_since_first_attempt: 0 })
       );
     }
 
     summaries.push({
-      "Call depth": call_depth,
-      "Service failure rate": failure_rate,
-      "Max retries": max_retries,
-      "Backoff base": backoff_base,
-      "Retry strategy": retry_strategy,
+      results,
+      summary: {
+        "Call depth": call_depth,
+        "Service failure rate": failure_rate,
+        "Max retries": max_retries,
+        "Backoff base": backoff_base,
+        "Retry strategy": retry_strategy,
 
-      "Average latency":
-        results.reduce((total, { latency }) => total + latency, 0) /
-        results.length,
-      "P99 latency": results.sort((a, b) => a.latency - b.latency)[
-        Math.ceil(0.99 * results.length)
-      ].latency,
-      "Success rate":
-        results.reduce(
-          (successes, { success }) => (success ? successes + 1 : successes),
-          0
-        ) / results.length,
-      Load: new Intl.NumberFormat("en-GB").format(bottom_service.req_count()),
+        "Average latency":
+          results.reduce((total, { latency }) => total + latency, 0) /
+          results.length,
+        "P99 latency": results.sort((a, b) => a.latency - b.latency)[
+          Math.ceil(0.99 * results.length)
+        ].latency,
+        "Success rate":
+          results.reduce(
+            (successes, { success }) => (success ? successes + 1 : successes),
+            0
+          ) / results.length,
+        Load: new Intl.NumberFormat("en-GB").format(bottom_service.req_count()),
+      },
     });
   }
 
-  console.table(summaries);
+  switch (output) {
+    // Output a summary table of all the results
+    case "table": {
+      console.log("Failure type: " + failure_type);
+      console.table(summaries.map((s) => s.summary));
+      break;
+    }
+
+    // Output the sorted latencies for the first set of results
+    case "latencies": {
+      const latencies = summaries[0].results
+        .map((r) => r.latency)
+        .sort((a, b) => a - b);
+      latencies.forEach((l) => {
+        stdout.write(`${l}\n`);
+      });
+      break;
+    }
+
+    // Output the latency percentiles for the first set of results
+    case "latency_percentiles": {
+      const latencies = summaries[0].results
+        .map((r) => r.latency)
+        .sort((a, b) => a - b);
+
+      const percentiles = latencies
+        .map((l, i) => [Math.floor((i * 100) / latencies.length), l])
+        .reduce((acc, [p, l]) => {
+          if (p === acc.length) {
+            acc.push([p, l]);
+          }
+          return acc;
+        }, [] as Array<[number, number]>);
+
+      percentiles.push([100, latencies[latencies.length - 1]]);
+
+      percentiles.forEach(([p, l]) => {
+        stdout.write(`${p} ${l}\n`);
+      });
+    }
+
+    default:
+      break;
+  }
 }
 
-const rand = erlang_dist.factory(5, 1);
-
-// Assume each service does some actual work
-function service_latency() {
-  return rand();
-}
-
-run();
+run(
+  10_000,
+  JSON.parse(
+    readFileSync(process.env["MODEL_CONFIG_FILE"] as string).toString()
+  ) as Config,
+  process.env["MODEL_OUTPUT"]
+);
