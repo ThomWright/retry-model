@@ -1,13 +1,16 @@
 set terminal png
-set output "plots/line.png"
 
 set key off
 set border 3
 
+set xlabel "Percentile"
 set ylabel "Latency (ms)"
 
+set xtics nomirror
+set ytics nomirror
+
 set style fill solid 1.0 noborder
-set linetype 1 linecolor rgb '#1864ab'
+set linetype 1 linecolor rgb '#477dca' linewidth 2
 
 # Input: a newline-separated list of "$percentile $latency" pairs
-plot '< cat -' with line
+plot 'tmp/data.dat' with line

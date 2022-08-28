@@ -1,3 +1,4 @@
+import assert = require("assert");
 import { readFileSync } from "fs";
 import { stdout } from "process";
 
@@ -22,6 +23,7 @@ interface Result {
 }
 interface Service {
   req_count(): number;
+  topology(): string;
 
   request({
     retry,
@@ -61,7 +63,13 @@ function create_service(
       return req_count;
     },
 
+    topology() {
+      return " -> service" + (dependency != null ? dependency.topology() : "");
+    },
+
     request({ retry, time_since_first_attempt }) {
+      assert(!retry || time_since_first_attempt > 0);
+
       req_count++;
 
       // Retries are more likely to success the longer they wait.
@@ -161,7 +169,7 @@ function run(n = 10_000, config: Config, output = "table") {
     const server: Service =
       call_depth > 1
         ? create_service(
-            Array.from(Array(call_depth - 1)).reduce(
+            Array.from(Array(call_depth - 2)).reduce(
               (dependency) =>
                 create_service(
                   dependency,
@@ -176,6 +184,8 @@ function run(n = 10_000, config: Config, output = "table") {
             backoff_base
           )
         : bottom_service;
+
+    // console.error("client" + server.topology());
 
     const results: Array<Result> = [];
     for (let step = 0; step < n; step++) {
@@ -204,7 +214,8 @@ function run(n = 10_000, config: Config, output = "table") {
             (successes, { success }) => (success ? successes + 1 : successes),
             0
           ) / results.length,
-        Load: new Intl.NumberFormat("en-GB").format(bottom_service.req_count()),
+        // Load: new Intl.NumberFormat("en-GB").format(bottom_service.req_count()),
+        Load: bottom_service.req_count(),
       },
     });
   }
@@ -214,6 +225,27 @@ function run(n = 10_000, config: Config, output = "table") {
     case "table": {
       console.log("Failure type: " + failure_type);
       console.table(summaries.map((s) => s.summary));
+      break;
+    }
+
+    // Output space-separated values of the table above
+    case "ssv": {
+      // console.table(summaries.map((s) => s.summary));
+      summaries.forEach((summary, i) => {
+        let s = summary.summary;
+        stdout.write(
+          `${i} \
+          ${s["Call depth"]} \
+          ${s["Service failure rate"] * 100} \
+          ${s["Max retries"]} \
+          ${s["Backoff base"]} \
+          ${s["Retry strategy"]} \
+          ${s["Average latency"]} \
+          ${s["P99 latency"]} \
+          ${s["Success rate"] * 100} \
+          ${s.Load}\n`
+        );
+      });
       break;
     }
 
