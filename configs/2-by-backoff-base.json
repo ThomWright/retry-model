@@ -1,0 +1,8 @@
+{
+  "call_depths": [2],
+  "failure_rates": [0.05],
+  "max_retry_values": [3],
+  "retry_strategies": ["top_only"],
+  "backoff_bases": [1, 10, 50, 100, 200],
+  "failure_type": "bottom_only"
+}

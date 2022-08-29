@@ -1,4 +1,4 @@
-set terminal png
+set terminal png size 650,500 font "sans,14";
 
 set key off
 set border 3

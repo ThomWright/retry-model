@@ -1,4 +1,4 @@
-set terminal png
+set terminal png size 650,500 font "sans,14";
 
 set border 3
 set key off
@@ -8,6 +8,8 @@ set ylabel "Load (reqs)"
 
 set xtics nomirror
 set ytics nomirror
+
+set grid xtics ytics
 
 set yrange [0:]
 
