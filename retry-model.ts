@@ -77,8 +77,9 @@ function create_service(
       // This is just linear for now for simplicity.
       const recovery_time = 2000;
       const scale = retry
-        ? 1 / Math.min(time_since_first_attempt / recovery_time, 1)
+        ? 1 - Math.min(time_since_first_attempt / recovery_time, 1)
         : 1;
+      assert(scale >= 0 && scale <= 1);
       const succeed = Math.random() > failure_rate * scale;
 
       if (dependency == null) {
