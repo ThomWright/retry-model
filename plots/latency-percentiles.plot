@@ -3,6 +3,10 @@ set terminal png size 650,500 font "sans,14";
 set key off
 set border 3
 
+set decimalsign locale
+set decimalsign "."
+set format "%'.0f"
+
 set xlabel "Percentile"
 set ylabel "Latency (ms)"
 

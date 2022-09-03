@@ -3,6 +3,10 @@ set terminal png size 650,500 font "sans,14";
 set border 3
 set key off
 
+set decimalsign locale
+set decimalsign "."
+set format "%'.0f"
+
 set xlabel "Failure rate (%)"
 set ylabel "Load (reqs)"
 

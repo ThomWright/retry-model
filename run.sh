@@ -19,6 +19,10 @@ MODEL_CONFIG_FILE="./configs/2-by-backoff-base.json" \
   MODEL_OUTPUT="table" \
   ts-node retry-model.ts
 
+MODEL_CONFIG_FILE="./configs/4-test.json" \
+  MODEL_OUTPUT="table" \
+  ts-node retry-model.ts
+
 # Single service
 
 MODEL_CONFIG_FILE="./configs/1-perfect.json" \
@@ -84,3 +88,25 @@ gnuplot -c plots/success-by-failure-rate.plot \
   > ./pngs/2-shorter-success-by-failure-rate.png
 gnuplot -c plots/load-by-failure-rate.plot \
   > ./pngs/2-shorter-load-by-failure-rate.png
+
+# Higher call depth
+
+MODEL_CONFIG_FILE="./configs/4-all.json" \
+  MODEL_OUTPUT="ssv" \
+  ts-node retry-model.ts > tmp/data.dat
+gnuplot -c plots/latency-by-failure-rate.plot \
+  > ./pngs/4-all-latency-by-failure-rate.png
+gnuplot -c plots/success-by-failure-rate.plot \
+  > ./pngs/4-all-success-by-failure-rate.png
+gnuplot -c plots/load-by-failure-rate.plot \
+  > ./pngs/4-all-load-by-failure-rate.png
+
+MODEL_CONFIG_FILE="./configs/4-top-only.json" \
+  MODEL_OUTPUT="ssv" \
+  ts-node retry-model.ts > tmp/data.dat
+gnuplot -c plots/latency-by-failure-rate.plot \
+  > ./pngs/4-top-only-latency-by-failure-rate.png
+gnuplot -c plots/success-by-failure-rate.plot \
+  > ./pngs/4-top-only-success-by-failure-rate.png
+gnuplot -c plots/load-by-failure-rate.plot \
+  > ./pngs/4-top-only-load-by-failure-rate.png

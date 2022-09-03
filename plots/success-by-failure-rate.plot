@@ -5,7 +5,6 @@ set key tmargin
 
 set xlabel "Failure rate (%)"
 set ylabel "Availability (%)"
-set y2label "Improvement (% points)"
 
 set xtics nomirror
 set ytics nomirror
